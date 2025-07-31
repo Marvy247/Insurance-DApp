@@ -26,6 +26,9 @@ contract PolicyContract is Ownable {
     mapping(uint256 => Policy) public policyById;
     mapping(uint256 => address) public policyOwner;
     
+    // Mapping to track how much each user is owed in refunds (pull payment pattern)
+    mapping(address => uint256) public pendingWithdrawals;
+    
     // Counter for policy IDs
     uint256 public policyCounter;
     
@@ -44,6 +47,8 @@ contract PolicyContract is Ownable {
     event PolicyCancelled(address indexed user, uint256 policyId);
     
     event MinimumPremiumUpdated(uint256 oldMinimum, uint256 newMinimum);
+    
+    event Withdrawal(address indexed user, uint256 amount);
 
     /**
      * @dev Constructor to initialize the contract
@@ -103,18 +108,27 @@ contract PolicyContract is Ownable {
         // For simplicity, we'll refund 50% of the premium
         uint256 refund = policy.premium / 2;
         
-        // Transfer refund (only if the contract has enough balance)
+        // Record the refund amount for the user to withdraw later (pull payment pattern)
         if (refund > 0) {
-            // Check contract balance before transfer
-            if (address(this).balance >= refund) {
-                // In a real implementation, you might want to use a pull payment pattern
-                // For now, we'll attempt the transfer but catch any errors
-                // to avoid reverting the entire transaction
-                // Note: This is a simplified approach for demonstration purposes
-            }
+            pendingWithdrawals[msg.sender] += refund;
         }
         
         emit PolicyCancelled(msg.sender, policyId);
+    }
+    
+    /**
+     * @dev Allow users to withdraw their pending refunds
+     */
+    function withdraw() external {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "No pending withdrawals");
+        
+        pendingWithdrawals[msg.sender] = 0;
+        
+        // Transfer the funds to the user
+        payable(msg.sender).transfer(amount);
+        
+        emit Withdrawal(msg.sender, amount);
     }
     
     /**
@@ -153,6 +167,15 @@ contract PolicyContract is Ownable {
     function getPolicyDetails(uint256 policyId) external view returns (uint256, uint256, uint256, bool) {
         Policy memory policy = policyById[policyId];
         return (policy.coverage, policy.premium, policy.expiry, policy.isActive);
+    }
+    
+    /**
+     * @dev Get pending withdrawal amount for a user
+     * @param user The user address
+     * @return The amount pending for withdrawal
+     */
+    function getPendingWithdrawal(address user) external view returns (uint256) {
+        return pendingWithdrawals[user];
     }
     
     /**

@@ -14,5 +14,5 @@ docs/
 .env
 
 # Todo.md and Details.md files
-todo.md
-details.md
+TODOS.md
+DETAILS.md
