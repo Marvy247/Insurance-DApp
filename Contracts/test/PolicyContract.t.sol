@@ -12,15 +12,15 @@ contract PolicyContractTest is Test {
     uint256 public constant POLICY_DURATION = 30 days;
     
     address public owner = address(this);
-    address public user1 = address(0x1);
-    address public user2 = address(0x2);
+    address public user1 = address(0x1111111111111111111111111111111111111111);
+    address public user2 = address(0x2222222222222222222222222222222222222222);
 
     function setUp() public {
         // Deploy the PolicyContract with owner as the initial owner
         policyContract = new PolicyContract(MINIMUM_PREMIUM, owner);
     }
 
-    function testConstructor() public {
+    function testConstructor() public view {
         assertEq(policyContract.minimumPremium(), MINIMUM_PREMIUM);
         assertEq(policyContract.owner(), owner);
     }
@@ -142,6 +142,9 @@ contract PolicyContractTest is Test {
         // Check contract balance after policy creation
         assertEq(address(policyContract).balance, premium);
         
+        // Check that user has no pending withdrawals before cancellation
+        assertEq(policyContract.getPendingWithdrawal(user1), 0);
+        
         // User cancels policy
         vm.prank(user1);
         policyContract.cancelPolicy(1);
@@ -150,8 +153,84 @@ contract PolicyContractTest is Test {
         (, , , bool isActive) = policyContract.policies(user1);
         assertFalse(isActive);
         
+        // Check that 50% of premium is recorded as pending withdrawal
+        uint256 expectedRefund = premium / 2;
+        assertEq(policyContract.getPendingWithdrawal(user1), expectedRefund);
+        
         // Check that the PolicyCancelled event was emitted
-        // Note: We don't check balance changes because transfers may fail in tests
+     }
+     
+    function testWithdraw() public {
+        // User creates a policy
+        vm.deal(user1, 1 ether);
+        vm.prank(user1);
+        
+        uint256 premium = 0.02 ether;
+        policyContract.createPolicy{value: premium}(COVERAGE_AMOUNT, POLICY_DURATION);
+        
+        // User cancels policy
+        vm.prank(user1);
+        policyContract.cancelPolicy(1);
+        
+        // Check that 50% of premium is recorded as pending withdrawal
+        uint256 expectedRefund = premium / 2;
+        assertEq(policyContract.getPendingWithdrawal(user1), expectedRefund);
+        
+        // User withdraws funds
+        vm.prank(user1);
+        policyContract.withdraw();
+        
+        // Check that pending withdrawal is now zero
+        assertEq(policyContract.getPendingWithdrawal(user1), 0);
+        
+        // Check that contract balance decreased by the refund amount
+        assertEq(address(policyContract).balance, premium - expectedRefund);
+    }
+    
+    function testWithdrawNoPendingFunds() public {
+        // User with no pending funds tries to withdraw
+        vm.deal(user1, 1 ether);
+        vm.prank(user1);
+        
+        // Expect revert when trying to withdraw with no pending funds
+        vm.expectRevert("No pending withdrawals");
+        policyContract.withdraw();
+    }
+    
+    function testMultiplePoliciesAndWithdrawals() public {
+        // User creates first policy
+        vm.deal(user1, 2 ether);
+        vm.prank(user1);
+        policyContract.createPolicy{value: 0.02 ether}(COVERAGE_AMOUNT, POLICY_DURATION);
+        
+        // User creates second policy
+        vm.prank(user1);
+        policyContract.createPolicy{value: 0.03 ether}(2 * COVERAGE_AMOUNT, 2 * POLICY_DURATION);
+        
+        // User cancels first policy
+        vm.prank(user1);
+        policyContract.cancelPolicy(1);
+        
+        // User cancels second policy
+        vm.prank(user1);
+        policyContract.cancelPolicy(2);
+        
+        // Check that pending withdrawal is sum of both refunds
+        uint256 expectedRefund = (0.02 ether / 2) + (0.03 ether / 2);
+        assertEq(policyContract.getPendingWithdrawal(user1), expectedRefund);
+        
+        // Check contract balance
+        assertEq(address(policyContract).balance, 0.05 ether);
+        
+        // User withdraws funds
+        vm.prank(user1);
+        policyContract.withdraw();
+        
+        // Check that pending withdrawal is now zero
+        assertEq(policyContract.getPendingWithdrawal(user1), 0);
+        
+        // Check that contract balance decreased by the refund amount
+        assertEq(address(policyContract).balance, 0.05 ether - expectedRefund);
     }
 
     function testCancelPolicyNotOwner() public {
